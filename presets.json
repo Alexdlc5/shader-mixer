@@ -1,0 +1,37 @@
+[
+  {
+    "name": "Ultra Realism",
+    "about": "Photoreal lighting + PBR textures + far terrain. Patrix and rotrBLOCKS with Complementary Unbound is the most-recommended free realism stack.",
+    "shader": "complementary-unbound",
+    "packs": ["fresh-animations", "fast-better-grass", "patrix-32x", "rotrblocks"],
+    "mods_off": []
+  },
+  {
+    "name": "Horror",
+    "about": "Spooklementary: crushing fog, pitch-black caves, eyes in the dark. Herobrine-led zombies, realistic mobs, blinking ender eyes, whispers in caves, over Patrix's realistic blocks. Distant Horizons off so the fog closes in.",
+    "shader": "spooklementary",
+    "packs": ["leader-zombie-herobrine-32x", "blinking-ender-eyes", "the-one-who-watches-cave-whispers", "realistic-mobs-new", "patrix-32x"],
+    "mods_off": ["distanthorizons"]
+  },
+  {
+    "name": "Halloween",
+    "about": "Stylised, not realistic: Mojang's Halloween Mash-up, Default-style Halloween and The Night of the Living Pumpkins over vanilla-like Complementary Reimagined.",
+    "shader": "complementary-reimagined",
+    "packs": ["the-night-of-the-living-pumpkins", "default-style-halloween-pack", "halloween-mash-up", "fresh-animations"],
+    "mods_off": []
+  },
+  {
+    "name": "Christmas",
+    "about": "Mojang's Festive Mash-up winter wonderland, present chests all year, Santa hats, snowy leaves and frosted foliage under BSL's soft light.",
+    "shader": "bsl-shaders",
+    "packs": ["christmas-hat", "christmas-chests-all-year", "snowy-leaves", "frozen-foliage", "festive-mash-up", "fresh-animations"],
+    "mods_off": []
+  },
+  {
+    "name": "Minecraft Trailer",
+    "about": "The 'Trailer Vibes' recipe: Bare Bones textures (Mojang's promo-art style) + Fresh Animations + their compatibility patch, lit by BSL.",
+    "shader": "bsl-shaders",
+    "packs": ["bare-bones-x-fresh-animations", "fresh-animations", "better-leaves-bare-bones", "bare-bones-pbr-x128"],
+    "mods_off": []
+  }
+]

@@ -12,7 +12,13 @@ MODS = ["fabric-api", "sodium", "iris", "distanthorizons", "entitytexturefeature
 SHADERS = ["complementary-unbound", "complementary-reimagined", "bliss-shader", "bsl-shaders",
            "noble", "sildurs-vibrant-shaders"]  # realism picks; every other 26.3 shader is added by all_shaders()
 PACKS = ["patrix-32x", "rotrblocks", "default-hd-128x", "modernarch", "primes-hd-textures",
-         "simplista", "fresh-animations", "fast-better-grass"]
+         "simplista", "fresh-animations", "fast-better-grass",
+         # themed presets (presets.json)
+         "bare-bones-pbr-x128", "bare-bones-pbr-x-fresh-animations", "better-leaves-bare-bones",
+         "halloween-mash-up", "default-style-halloween-pack", "the-night-of-the-living-pumpkins",
+         "blinking-ender-eyes", "the-one-who-watches-cave-whispers", "leader-zombie-herobrine-32x", "realistic-mobs-new",
+         "bare-bones-x-fresh-animations",
+         "festive-mash-up", "christmas-chests-all-year", "christmas-hat", "snowy-leaves", "frozen-foliage"]
 MANIFEST = GAME / "installed.json"
 INSTALLED = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
 UA = {"User-Agent": "Alexdlc5/mc-realism-picker/1.0"}
@@ -40,6 +46,8 @@ def all_shaders():
 def fetch(slug, folder, loaders):
     q = urllib.parse.urlencode({"game_versions": json.dumps([MC]), "loaders": json.dumps(loaders)})
     versions = json.loads(get(f"https://api.modrinth.com/v2/project/{slug}/version?{q}"))
+    if not versions and loaders == ["minecraft"]:  # untagged resource pack: newest build, picker checks its format
+        versions = json.loads(get(f"https://api.modrinth.com/v2/project/{slug}/version"))[:1]
     if not versions:
         print(f"  !! {slug}: no {MC} build, skipped"); return
     v = next((v for v in versions if v["version_type"] == "release"), versions[0])  # stable beats alpha/beta

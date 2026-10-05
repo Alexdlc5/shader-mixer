@@ -10,10 +10,33 @@ PACK_NEEDS = {  # resource-pack content -> mod id that renders it
     "ctm": (r"optifine/ctm/", "continuity", "connected textures"),
     "cem": (r"(optifine/cem/|/emf/)", "entity_model_features", "custom entity models"),
     "etf": (r"(optifine/(random|emissive|mob)/|/etf/)", "entity_texture_features", "random/emissive entity textures"),
+    "sky": (r"optifine/sky/", "fabricskyboxes", "OptiFine custom skies"),  # nothing for 26.3 renders these
 }
 LAUNCHER = r"shell:AppsFolder\Microsoft.4297127D64EC6_8wekyb3d8bbwe!Minecraft"
-PRESET = {"shader": "ComplementaryUnbound", "packs": ["Patrix", "rotrBLOCKS", "FreshAnimations", "Fast Better Grass"],
-          "mods": "all"}
+BUILTIN_PRESETS = pathlib.Path(__file__).with_name("presets.json")
+USER_PRESETS = GAME / "my_presets.json"
+
+
+# ---------- presets: {"name", "shader", "packs" (top wins), "mods_off"}; entries are Modrinth slugs or filenames ----------
+def load_presets():
+    builtin = [{**p, "builtin": True} for p in json.loads(BUILTIN_PRESETS.read_text(encoding="utf-8"))]
+    try: user = json.loads(USER_PRESETS.read_text(encoding="utf-8"))
+    except (OSError, ValueError): user = []
+    return builtin + [p for p in user if isinstance(p, dict) and p.get("name")]
+
+
+def save_user_presets(presets):
+    mine = [{k: v for k, v in p.items() if k != "builtin"} for p in presets if not p.get("builtin")]
+    USER_PRESETS.write_text(json.dumps(mine, indent=2), encoding="utf-8")
+
+
+def resolve_preset(preset, installed, shader_files, pack_files):
+    """Map slugs to the files setup.py installed. Returns (shader file or None, pack files, missing names)."""
+    to_file = lambda x: installed.get(x, x)
+    shader = preset.get("shader") and to_file(preset["shader"])
+    packs = [to_file(p) for p in preset.get("packs", [])]
+    missing = ([shader] if shader and shader not in shader_files else []) + [p for p in packs if p not in pack_files]
+    return (shader if shader in shader_files else None), [p for p in packs if p in pack_files], missing
 
 
 # ---------- inspection (pure, read-only: zips are listed, never extracted) ----------
@@ -141,7 +164,7 @@ def launch():
 # ---------- GUI ----------
 def gui():
     import tkinter as tk
-    from tkinter import ttk, messagebox
+    from tkinter import ttk, messagebox, simpledialog
 
     if not (GAME / "mods").exists():
         messagebox.showerror("Realism Picker", "Run setup.py first."); return
@@ -151,17 +174,31 @@ def gui():
     mod_files = sorted(f.name.removesuffix(".disabled") for f in (GAME / "mods").iterdir() if f.name.endswith((".jar", ".jar.disabled")))
     mods = {f: inspect_mod(GAME / "mods" / (f if (GAME / "mods" / f).exists() else f + ".disabled")) for f in mod_files}
 
-    root = tk.Tk(); root.title("Realism Picker — Minecraft 26.3"); root.geometry("920x620")
+    try: installed = json.loads((GAME / "installed.json").read_text())
+    except (OSError, ValueError): installed = {}
+    presets = load_presets()
+
+    root = tk.Tk(); root.title("Realism Picker — Minecraft 26.3"); root.geometry("1180x640")
     cols = ttk.Frame(root, padding=10); cols.pack(fill="both", expand=True)
 
+    # shader packs (presets)
+    prf = ttk.LabelFrame(cols, text="Shader packs", padding=6); prf.grid(row=0, column=0, sticky="nsew", padx=4)
+    pr_list = tk.Listbox(prf, exportselection=False, width=24, height=12); pr_list.pack(fill="x")
+    about = ttk.Label(prf, wraplength=190, justify="left", foreground="#555"); about.pack(fill="x", pady=6)
+
+    def redraw_presets(sel=0):
+        pr_list.delete(0, "end")
+        for p in presets: pr_list.insert("end", ("★ " if p.get("builtin") else "   ") + p["name"])
+        pr_list.selection_set(sel); pr_list.see(sel)
+
     # shaders
-    sf = ttk.LabelFrame(cols, text="Shader (one)", padding=6); sf.grid(row=0, column=0, sticky="nsew", padx=4)
+    sf = ttk.LabelFrame(cols, text="Shader (one)", padding=6); sf.grid(row=0, column=1, sticky="nsew", padx=4)
     shader_names = ["(none)"] + list(shaders)
     sh_list = tk.Listbox(sf, exportselection=False, width=38, height=24); sh_list.pack(fill="both", expand=True)
     for n in shader_names: sh_list.insert("end", n.removesuffix(".zip") + ("" if n == "(none)" or shaders[n]["dh"] else "   [no DH]"))
 
     # packs (ordered, top = highest priority)
-    pf = ttk.LabelFrame(cols, text="Resource packs (top wins)", padding=6); pf.grid(row=0, column=1, sticky="nsew", padx=4)
+    pf = ttk.LabelFrame(cols, text="Resource packs (top wins)", padding=6); pf.grid(row=0, column=2, sticky="nsew", padx=4)
     order = list(packs); chosen = {p: tk.BooleanVar() for p in packs}
     pk_list = tk.Listbox(pf, exportselection=False, width=44, height=20); pk_list.pack(fill="both", expand=True)
 
@@ -188,13 +225,13 @@ def gui():
     ttk.Button(bf, text="▼", width=3, command=lambda: move(1)).pack(side="left")
 
     # mods
-    mf = ttk.LabelFrame(cols, text="Mods", padding=6); mf.grid(row=0, column=2, sticky="nsew", padx=4)
+    mf = ttk.LabelFrame(cols, text="Mods", padding=6); mf.grid(row=0, column=3, sticky="nsew", padx=4)
     mod_on = {}
     for f in mod_files:
         v = tk.BooleanVar(value=(GAME / "mods" / f).exists()); mod_on[f] = v
         cb = ttk.Checkbutton(mf, text=mods[f]["id"], variable=v); cb.pack(anchor="w")
         if mods[f]["id"] in CORE_MODS: v.set(True); cb.state(["disabled"])
-    cols.columnconfigure((0, 1), weight=1); cols.rowconfigure(0, weight=1)
+    cols.columnconfigure((1, 2), weight=1); cols.rowconfigure(0, weight=1)
 
     status = tk.Text(root, height=6, wrap="word"); status.pack(fill="x", padx=14)
 
@@ -223,22 +260,60 @@ def gui():
         else:
             messagebox.showinfo("Realism Picker", "Saved. It applies next time you press Play on 'Ultra Realism (shaders)'.")
 
-    def preset():
-        s = next((i for i, n in enumerate(shader_names) if n.startswith(PRESET["shader"])), 0)
+    def current_preset():
+        i = pr_list.curselection()
+        return presets[i[0]] if i else None
+
+    def use_preset(_=None):
+        pr = current_preset()
+        if not pr: return
+        about.config(text=pr.get("about", "Your saved pack."))
+        shader, sel, missing = resolve_preset(pr, installed, shaders, packs)
+        s = shader_names.index(shader) if shader else 0
         sh_list.selection_clear(0, "end"); sh_list.selection_set(s); sh_list.see(s)
-        for p in packs: chosen[p].set(any(p.startswith(x) for x in PRESET["packs"]))
-        order.sort(key=lambda p: next((i for i, x in enumerate(PRESET["packs"]) if p.startswith(x)), 99))
-        for f in mod_files: mod_on[f].set(True)
+        for p in packs: chosen[p].set(p in sel)
+        order.sort(key=lambda p: sel.index(p) if p in sel else len(sel))
+        off = set(pr.get("mods_off", []))
+        for f in mod_files: mod_on[f].set(mods[f]["id"] in CORE_MODS or mods[f]["id"] not in off)
         redraw(); validate()
+        if missing: status.insert("1.0", "✖ Not installed (run setup.py): " + ", ".join(missing) + "\n")
+
+    def save_preset():
+        if validate():
+            messagebox.showerror("Refused", "Only working combinations can be saved:\n\n" + status.get("1.0", "end")); return
+        name = simpledialog.askstring("Save shader pack", "Name for this shader pack:", parent=root)
+        if not name or not name.strip(): return
+        name = name.strip()
+        old = next((i for i, p in enumerate(presets) if p["name"].lower() == name.lower()), None)
+        if old is not None and presets[old].get("builtin"):
+            messagebox.showerror("Save shader pack", f"'{name}' is a built-in pack; pick another name."); return
+        if old is not None and not messagebox.askyesno("Save shader pack", f"Replace your pack '{name}'?"): return
+        s, _, sel_packs, en = selection()
+        new = {"name": name, "shader": None if s == "(none)" else s, "packs": sel_packs,
+               "mods_off": sorted(mods[f]["id"] for f in mod_files if f not in en)}
+        if old is None: presets.append(new)
+        else: presets[old] = new
+        save_user_presets(presets); redraw_presets(presets.index(new)); about.config(text="Your saved pack.")
+
+    def delete_preset():
+        pr = current_preset()
+        if not pr or pr.get("builtin"):
+            messagebox.showinfo("Delete", "Built-in packs can't be deleted."); return
+        if messagebox.askyesno("Delete", f"Delete '{pr['name']}'?"):
+            presets.remove(pr); save_user_presets(presets); redraw_presets(); use_preset()
+
+    pb = ttk.Frame(prf); pb.pack(fill="x")
+    ttk.Button(pb, text="Save current…", command=save_preset).pack(side="left")
+    ttk.Button(pb, text="Delete", command=delete_preset).pack(side="left", padx=4)
+    pr_list.bind("<<ListboxSelect>>", use_preset)
 
     bar = ttk.Frame(root, padding=10); bar.pack(fill="x")
-    ttk.Button(bar, text="Ultra Realism preset", command=preset).pack(side="left")
-    ttk.Button(bar, text="Check", command=validate).pack(side="left", padx=6)
+    ttk.Button(bar, text="Check", command=validate).pack(side="left")
     ttk.Button(bar, text="Save only", command=lambda: go(False)).pack(side="right")
     ttk.Button(bar, text="Save & Launch", command=lambda: go(True)).pack(side="right", padx=6)
     sh_list.bind("<<ListboxSelect>>", validate)
     for v in mod_on.values(): v.trace_add("write", lambda *_: validate())
-    preset()
+    redraw_presets(); use_preset()
     root.mainloop()
 
 
@@ -258,6 +333,11 @@ def selftest():
     assert check({"name": "S", "dh": False, "requires": set()}, {}, dh, g, feats)[0]    # DH + non-DH shader
     assert check({"name": "S", "dh": True, "requires": {"NOPE"}}, {}, base, g, feats)[0]  # unknown Iris feature
     assert check(None, {}, {**base, "e": mod("entity_model_features", ["entity_texture_features"])}, g, feats)[0]
+    inst = {"bsl": "BSL.zip", "fa": "FA.zip"}
+    assert resolve_preset({"shader": "bsl", "packs": ["fa", "My.zip", "gone"]}, inst, {"BSL.zip"}, {"FA.zip", "My.zip"}) \
+        == ("BSL.zip", ["FA.zip", "My.zip"], ["gone"])
+    assert resolve_preset({"shader": None, "packs": []}, inst, set(), set()) == (None, [], [])
+    assert json.loads(BUILTIN_PRESETS.read_text(encoding="utf-8"))[0]["name"] == "Ultra Realism"
     print("selftest ok")
 
 
