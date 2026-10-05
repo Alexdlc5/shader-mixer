@@ -1,11 +1,14 @@
-﻿"""One-time installer: Fabric + Sodium/Iris/DH + realism shaders & packs for the newest MC release.
-Re-run any time to update everything to the latest 26.x builds."""
+"""Shader Mixer installer: Fabric + Sodium/Iris/DH + shaders & resource packs for the newest MC release.
+Re-run any time to update everything to the latest builds."""
 import json, os, sys, urllib.request, urllib.parse, datetime, pathlib, hashlib
 
 sys.stdout.reconfigure(errors="replace")  # pack names carry emoji / § codes
 
 MC = "26.3"
-GAME = pathlib.Path(os.environ["APPDATA"]) / ".minecraft-ultra"
+GAME = pathlib.Path(os.environ["APPDATA"]) / ".shader-mixer"
+OLD_GAME = GAME.with_name(".minecraft-ultra")  # location before the rename
+if OLD_GAME.exists() and not GAME.exists():
+    OLD_GAME.rename(GAME)
 MCDIR = pathlib.Path(os.environ["APPDATA"]) / ".minecraft"
 MODS = ["fabric-api", "sodium", "iris", "distanthorizons", "entitytexturefeatures",
         "entity-model-features", "continuity"]
@@ -14,21 +17,20 @@ SHADERS = ["complementary-unbound", "complementary-reimagined", "bliss-shader", 
 PACKS = ["patrix-32x", "rotrblocks", "default-hd-128x", "modernarch", "primes-hd-textures",
          "simplista", "fresh-animations", "fast-better-grass",
          # themed presets (presets.json)
-         "bare-bones-pbr-x128", "bare-bones-pbr-x-fresh-animations", "better-leaves-bare-bones",
+         "bare-bones-pbr-x128", "bare-bones-x-fresh-animations", "better-leaves-bare-bones",
          "halloween-mash-up", "default-style-halloween-pack", "the-night-of-the-living-pumpkins",
          "blinking-ender-eyes", "the-one-who-watches-cave-whispers", "leader-zombie-herobrine-32x", "realistic-mobs-new",
-         "bare-bones-x-fresh-animations",
          "festive-mash-up", "christmas-chests-all-year", "christmas-hat", "snowy-leaves", "frozen-foliage"]
 MANIFEST = GAME / "installed.json"
 INSTALLED = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
-UA = {"User-Agent": "Alexdlc5/mc-realism-picker/1.0"}
+UA = {"User-Agent": "Alexdlc5/shader-mixer/1.0"}
 
 
 def get(url):
     if not url.startswith("https://"):
         raise ValueError(f"refusing non-HTTPS URL: {url}")
-    return urllib.request.urlopen(  # nosec B310
-urllib.request.Request(url, headers=UA), timeout=120).read()
+    req = urllib.request.Request(url, headers=UA)
+    return urllib.request.urlopen(req, timeout=120).read()  # nosec B310
 
 
 def all_shaders():
@@ -46,7 +48,7 @@ def all_shaders():
 def fetch(slug, folder, loaders):
     q = urllib.parse.urlencode({"game_versions": json.dumps([MC]), "loaders": json.dumps(loaders)})
     versions = json.loads(get(f"https://api.modrinth.com/v2/project/{slug}/version?{q}"))
-    if not versions and loaders == ["minecraft"]:  # untagged resource pack: newest build, picker checks its format
+    if not versions and loaders == ["minecraft"]:  # untagged resource pack: newest build, the app checks its format
         versions = json.loads(get(f"https://api.modrinth.com/v2/project/{slug}/version"))[:1]
     if not versions:
         print(f"  !! {slug}: no {MC} build, skipped"); return
@@ -73,6 +75,8 @@ def fetch(slug, folder, loaders):
 
 
 def main():
+    if not (MCDIR / "versions" / MC / f"{MC}.jar").exists():
+        sys.exit(f"Minecraft {MC} isn't installed yet. Open the Minecraft Launcher, play {MC} once, close it, then run this again.")
     for d in ("mods", "shaderpacks", "resourcepacks", "config"):
         (GAME / d).mkdir(parents=True, exist_ok=True)
 
@@ -90,25 +94,26 @@ def main():
     finally:
         MANIFEST.write_text(json.dumps(INSTALLED, indent=2))
 
-    # Smooth-but-pretty defaults for an RTX 3080; DH supplies the far terrain so vanilla distance stays modest.
+    # Smooth-but-pretty defaults; Distant Horizons supplies the far terrain so vanilla distance stays modest.
     opts = GAME / "options.txt"
     if not opts.exists():
         opts.write_text("renderDistance:12\nsimulationDistance:8\nmipmapLevels:4\nentityShadows:true\n"
                         "biomeBlendRadius:3\nenableVsync:true\nmaxFps:260\n")
 
-    # Profile in the official launcher (launcher must be closed or it overwrites this file).
+    # Profile in the official launcher (the launcher must be closed or it overwrites this file).
     lp_path = MCDIR / "launcher_profiles.json"
     lp = json.loads(lp_path.read_text())
-    key = "mc-ultra-realism"
+    old = lp["profiles"].pop("mc-ultra-realism", {})
+    key = "shader-mixer"
     lp["profiles"][key] = {
-        **lp["profiles"].get(key, {}),
-        "name": "Ultra Realism (shaders)", "type": "custom", "icon": "Grass",
+        **old, **lp["profiles"].get(key, {}),
+        "name": "Shader Mixer", "type": "custom", "icon": "Grass",
         "lastVersionId": vid, "gameDir": str(GAME),
         "javaArgs": "-Xmx8G -Xms4G -XX:+UseZGC",
-        "created": lp["profiles"].get(key, {}).get("created", datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")),
+        "created": lp["profiles"].get(key, old).get("created", datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")),
     }
     lp_path.write_text(json.dumps(lp, indent=2))
-    print(f"\nDone. Launcher profile 'Ultra Realism (shaders)' -> {GAME}")
+    print(f"\nDone. Launcher profile 'Shader Mixer' -> {GAME}")
 
 
 if __name__ == "__main__":

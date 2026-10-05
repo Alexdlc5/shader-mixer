@@ -1,8 +1,8 @@
-"""Realism Picker: choose shader + resource packs + optional mods, refuse broken combos, launch Minecraft."""
+"""Shader Mixer: choose a shader + resource packs + optional mods, refuse broken combos, launch Minecraft."""
 import json, os, re, subprocess, sys, zipfile, pathlib, math
 
 APPDATA = pathlib.Path(os.environ.get("APPDATA", "."))
-GAME = APPDATA / ".minecraft-ultra"
+GAME = APPDATA / ".shader-mixer"
 MC_JAR = APPDATA / ".minecraft" / "versions" / "26.3" / "26.3.jar"
 CORE_MODS = {"fabric-api", "sodium", "iris"}  # never toggleable
 ALWAYS_THERE = ("minecraft", "java", "fabricloader", "fabric")  # dep ids satisfied by the loader / fabric-api
@@ -154,7 +154,7 @@ def launch():
     try:  # make our profile the most recently used so the launcher preselects it
         import datetime
         d = json.loads(lp.read_text())
-        d["profiles"]["mc-ultra-realism"]["lastUsed"] = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        d["profiles"]["shader-mixer"]["lastUsed"] = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         lp.write_text(json.dumps(d, indent=2))
     except Exception:
         pass
@@ -162,103 +162,183 @@ def launch():
 
 
 # ---------- GUI ----------
+BG, CARD, INK, MUTED, LINE, SOFT = "#FAF7F2", "#FFFFFF", "#2F2A35", "#9A93A2", "#EDE7DE", "#F3EEE7"
+ACCENT = {  # pastel fill, deeper ink of the same hue
+    "lavender": ("#E9E3FA", "#6B5CA5"), "sky": ("#DFECFA", "#3D6E9E"), "peach": ("#FCE6DA", "#B5643C"),
+    "mint": ("#DDF2E6", "#3E8A62"), "rose": ("#F9E0E5", "#A8445E"), "butter": ("#FBF1D3", "#8A6D1E"),
+}
+FONT = "Segoe UI"
+
+
 def gui():
     import tkinter as tk
-    from tkinter import ttk, messagebox, simpledialog
+    from tkinter import messagebox, simpledialog
 
     if not (GAME / "mods").exists():
-        messagebox.showerror("Realism Picker", "Run setup.py first."); return
+        messagebox.showerror("Shader Mixer", "Run install.bat (or setup.py) first."); return
     game_fmt, feats = game_format(), iris_features()
     shaders = {f.name: {**inspect_shader(f), "name": f.stem} for f in sorted((GAME / "shaderpacks").glob("*.zip"), key=lambda p: p.name.lower())}
     packs = {f.name: inspect_pack(f) for f in sorted((GAME / "resourcepacks").glob("*.zip"), key=lambda p: p.name.lower())}
     mod_files = sorted(f.name.removesuffix(".disabled") for f in (GAME / "mods").iterdir() if f.name.endswith((".jar", ".jar.disabled")))
     mods = {f: inspect_mod(GAME / "mods" / (f if (GAME / "mods" / f).exists() else f + ".disabled")) for f in mod_files}
-
     try: installed = json.loads((GAME / "installed.json").read_text())
     except (OSError, ValueError): installed = {}
     presets = load_presets()
 
-    root = tk.Tk(); root.title("Realism Picker — Minecraft 26.3"); root.geometry("1180x640")
-    cols = ttk.Frame(root, padding=10); cols.pack(fill="both", expand=True)
+    root = tk.Tk(); root.title("Shader Mixer"); root.geometry("1200x700"); root.minsize(980, 560)
+    root.configure(bg=BG)
+    root.option_add("*Font", (FONT, 10))
 
-    # shader packs (presets)
-    prf = ttk.LabelFrame(cols, text="Shader packs", padding=6); prf.grid(row=0, column=0, sticky="nsew", padx=4)
-    pr_list = tk.Listbox(prf, exportselection=False, width=24, height=12); pr_list.pack(fill="x")
-    about = ttk.Label(prf, wraplength=190, justify="left", foreground="#555"); about.pack(fill="x", pady=6)
+    def button(parent, text, cmd, tone=None):
+        fill, ink = ACCENT[tone] if tone else (SOFT, INK)
+        b = tk.Button(parent, text=text, command=cmd, bg=fill, fg=ink, activebackground=LINE, activeforeground=INK,
+                      relief="flat", bd=0, padx=14, pady=6, cursor="hand2", font=(FONT, 10, "bold" if tone else "normal"),
+                      highlightthickness=1, highlightbackground=LINE)
+        b.bind("<Enter>", lambda _: b.config(bg=LINE)); b.bind("<Leave>", lambda _: b.config(bg=fill))
+        return b
+
+    def card(col, title, tone, hint=""):
+        outer = tk.Frame(cols, bg=LINE, padx=1, pady=1); outer.grid(row=0, column=col, sticky="nsew", padx=6)
+        inner = tk.Frame(outer, bg=CARD, padx=12, pady=12); inner.pack(fill="both", expand=True)
+        head = tk.Frame(inner, bg=CARD); head.pack(fill="x", pady=(0, 8))
+        fill, ink = ACCENT[tone]
+        tk.Label(head, text=title, bg=fill, fg=ink, font=(FONT, 9, "bold"), padx=8, pady=2).pack(side="left")
+        if hint: tk.Label(head, text=hint, bg=CARD, fg=MUTED, font=(FONT, 9)).pack(side="left", padx=8)
+        return inner
+
+    def listbox(parent, tone, **kw):
+        return tk.Listbox(parent, exportselection=False, bd=0, highlightthickness=0, activestyle="none", bg=CARD, fg=INK,
+                          selectbackground=ACCENT[tone][0], selectforeground=INK, font=(FONT, 10), **kw)
+
+    # header
+    top = tk.Frame(root, bg=BG, padx=22, pady=16); top.pack(fill="x")
+    tk.Label(top, text="Shader Mixer", bg=BG, fg=INK, font=(FONT, 20, "bold")).pack(side="left")
+    tk.Label(top, text="Minecraft 26.3  ·  pick a look, or mix your own", bg=BG, fg=MUTED, font=(FONT, 10)).pack(side="left", padx=14, pady=(8, 0))
+    dots = tk.Frame(top, bg=BG); dots.pack(side="right", pady=(8, 0))
+    for tone in ("lavender", "sky", "peach", "mint"):
+        tk.Label(dots, text="●", bg=BG, fg=ACCENT[tone][1], font=(FONT, 8)).pack(side="left", padx=2)
+
+    cols = tk.Frame(root, bg=BG, padx=16); cols.pack(fill="both", expand=True)
+
+    # 1. shader packs (presets)
+    c1 = card(0, "SHADER PACKS", "lavender")
+    pr_list = listbox(c1, "lavender", width=22, height=9); pr_list.pack(fill="x")
+    about = tk.Label(c1, bg=CARD, fg=MUTED, wraplength=190, justify="left", anchor="nw", font=(FONT, 9))
+    about.pack(fill="both", expand=True, pady=10)
+    pb = tk.Frame(c1, bg=CARD); pb.pack(fill="x")
 
     def redraw_presets(sel=0):
         pr_list.delete(0, "end")
-        for p in presets: pr_list.insert("end", ("★ " if p.get("builtin") else "   ") + p["name"])
+        for p in presets: pr_list.insert("end", ("  ✦  " if p.get("builtin") else "  ·  ") + p["name"])
         pr_list.selection_set(sel); pr_list.see(sel)
 
-    # shaders
-    sf = ttk.LabelFrame(cols, text="Shader (one)", padding=6); sf.grid(row=0, column=1, sticky="nsew", padx=4)
-    shader_names = ["(none)"] + list(shaders)
-    sh_list = tk.Listbox(sf, exportselection=False, width=38, height=24); sh_list.pack(fill="both", expand=True)
-    for n in shader_names: sh_list.insert("end", n.removesuffix(".zip") + ("" if n == "(none)" or shaders[n]["dh"] else "   [no DH]"))
+    # 2. shader, with a filter box (there are ~190)
+    c2 = card(1, "SHADER", "sky", "pick one")
+    query = tk.StringVar()
+    box = tk.Frame(c2, bg=BG, highlightthickness=1, highlightbackground=LINE); box.pack(fill="x", pady=(0, 8))
+    tk.Label(box, text="search", bg=BG, fg=MUTED, font=(FONT, 9), padx=8).pack(side="left")
+    tk.Entry(box, textvariable=query, bd=0, bg=BG, fg=INK, insertbackground=INK, font=(FONT, 10)).pack(fill="x", ipady=5, padx=(0, 8))
+    sh_list = listbox(c2, "sky", width=36); sh_list.pack(fill="both", expand=True)
+    all_shaders = ["(none)"] + list(shaders); visible = list(all_shaders); picked = {"shader": "(none)"}
 
-    # packs (ordered, top = highest priority)
-    pf = ttk.LabelFrame(cols, text="Resource packs (top wins)", padding=6); pf.grid(row=0, column=2, sticky="nsew", padx=4)
-    order = list(packs); chosen = {p: tk.BooleanVar() for p in packs}
-    pk_list = tk.Listbox(pf, exportselection=False, width=44, height=20); pk_list.pack(fill="both", expand=True)
+    def redraw_shaders(*_):
+        q = query.get().strip().lower()
+        visible[:] = [n for n in all_shaders if q in n.lower()] or ["(none)"]
+        sh_list.delete(0, "end")
+        for i, n in enumerate(visible):
+            sh_list.insert("end", "  " + n.removesuffix(".zip"))
+            if n != "(none)" and not shaders[n]["dh"]: sh_list.itemconfig(i, fg=MUTED)
+        if picked["shader"] in visible:
+            i = visible.index(picked["shader"]); sh_list.selection_set(i); sh_list.see(i)
+
+    def pick_shader(_=None):
+        i = sh_list.curselection()
+        if i: picked["shader"] = visible[i[0]]; validate()
+
+    query.trace_add("write", redraw_shaders)
+    tk.Label(c2, text="grey = no Distant Horizons support", bg=CARD, fg=MUTED, font=(FONT, 8)).pack(anchor="w", pady=(6, 0))
+
+    # 3. resource packs, ordered (top wins)
+    c3 = card(2, "RESOURCE PACKS", "peach", "top wins · double-click to toggle")
+    order = list(packs); chosen = {p: False for p in packs}
+    pk_list = listbox(c3, "peach", width=40); pk_list.pack(fill="both", expand=True)
 
     def redraw(sel=None):
         pk_list.delete(0, "end")
-        for p in order:
-            tag = " PBR" if packs[p]["pbr"] else ""
-            pk_list.insert("end", f"{'☑' if chosen[p].get() else '☐'} {p.removesuffix('.zip')}{tag}")
-        if sel is not None: pk_list.selection_set(sel)
+        for i, p in enumerate(order):
+            pk_list.insert("end", f"  {'●' if chosen[p] else '○'}  {p.removesuffix('.zip')}" + ("   pbr" if packs[p]["pbr"] else ""))
+            pk_list.itemconfig(i, fg=INK if chosen[p] else MUTED)
+        if sel is not None: pk_list.selection_set(sel); pk_list.see(sel)
 
     def toggle(_=None):
         i = pk_list.curselection()
-        if i: chosen[order[i[0]]].set(not chosen[order[i[0]]].get()); redraw(i[0])
+        if i: p = order[i[0]]; chosen[p] = not chosen[p]; redraw(i[0]); validate()
 
     def move(d):
         i = pk_list.curselection()
         if not i or not 0 <= i[0] + d < len(order): return
-        a = i[0]; order[a], order[a + d] = order[a + d], order[a]; redraw(a + d)
+        a = i[0]; order[a], order[a + d] = order[a + d], order[a]; redraw(a + d); validate()
 
     pk_list.bind("<Double-Button-1>", toggle); pk_list.bind("<space>", toggle)
-    bf = ttk.Frame(pf); bf.pack(fill="x")
-    ttk.Button(bf, text="Toggle", command=toggle).pack(side="left")
-    ttk.Button(bf, text="▲", width=3, command=lambda: move(-1)).pack(side="left")
-    ttk.Button(bf, text="▼", width=3, command=lambda: move(1)).pack(side="left")
+    bf = tk.Frame(c3, bg=CARD); bf.pack(fill="x", pady=(8, 0))
+    button(bf, "Toggle", toggle).pack(side="left")
+    button(bf, "↑", lambda: move(-1)).pack(side="left", padx=(6, 0))
+    button(bf, "↓", lambda: move(1)).pack(side="left", padx=(6, 0))
 
-    # mods
-    mf = ttk.LabelFrame(cols, text="Mods", padding=6); mf.grid(row=0, column=3, sticky="nsew", padx=4)
-    mod_on = {}
+    # 4. mods: click a row to switch it
+    c4 = card(3, "MODS", "mint")
+    mod_on, mod_rows = {f: (GAME / "mods" / f).exists() or mods[f]["id"] in CORE_MODS for f in mod_files}, {}
+
+    def paint_mod(f):
+        core = mods[f]["id"] in CORE_MODS
+        mod_rows[f].config(text=("●  " if mod_on[f] else "○  ") + mods[f]["id"] + ("   required" if core else ""),
+                           fg=MUTED if core else (ACCENT["mint"][1] if mod_on[f] else MUTED))
+
+    def flip_mod(f):
+        if mods[f]["id"] in CORE_MODS: return
+        mod_on[f] = not mod_on[f]; paint_mod(f); validate()
+
     for f in mod_files:
-        v = tk.BooleanVar(value=(GAME / "mods" / f).exists()); mod_on[f] = v
-        cb = ttk.Checkbutton(mf, text=mods[f]["id"], variable=v); cb.pack(anchor="w")
-        if mods[f]["id"] in CORE_MODS: v.set(True); cb.state(["disabled"])
+        core = mods[f]["id"] in CORE_MODS
+        mod_rows[f] = tk.Label(c4, bg=CARD, anchor="w", font=(FONT, 10), cursor="" if core else "hand2")
+        mod_rows[f].pack(fill="x", pady=2); mod_rows[f].bind("<Button-1>", lambda _, f=f: flip_mod(f)); paint_mod(f)
+
     cols.columnconfigure((1, 2), weight=1); cols.rowconfigure(0, weight=1)
 
-    status = tk.Text(root, height=6, wrap="word"); status.pack(fill="x", padx=14)
+    # status pill + actions
+    foot = tk.Frame(root, bg=BG, padx=22, pady=14); foot.pack(fill="x")
+    status = tk.Label(foot, bg=BG, anchor="w", justify="left", font=(FONT, 10), padx=12, pady=8, wraplength=640)
+    status.pack(side="left", fill="x", expand=True)
+    msg = {"text": ""}
 
     def selection():
-        i = sh_list.curselection(); s = shader_names[i[0]] if i else "(none)"
-        sh = None if s == "(none)" else shaders[s]
-        sel_packs = [p for p in order if chosen[p].get()]
-        en = {f: mods[f] for f in mod_files if mod_on[f].get()}
-        return s, sh, sel_packs, en
+        s = picked["shader"]
+        en = {f: mods[f] for f in mod_files if mod_on[f]}
+        return s, (None if s == "(none)" else shaders[s]), [p for p in order if chosen[p]], en
 
-    def validate(_=None):
+    def say(lines, tone):
+        msg["text"] = "\n".join(lines)
+        status.config(text=msg["text"], bg=ACCENT[tone][0], fg=ACCENT[tone][1])
+
+    def validate(_=None, extra=()):
         s, sh, sel_packs, en = selection()
         err, warn = check(sh, {p: packs[p] for p in sel_packs}, en, game_fmt, feats)
-        status.delete("1.0", "end")
-        status.insert("end", "\n".join(["✖ " + e for e in err] + ["⚠ " + w for w in warn]) or "✔ This combination will load.")
+        err = list(extra) + err
+        if err: say(["✕  " + e for e in err], "rose")
+        elif warn: say(["!  " + w for w in warn], "butter")
+        else: say(["✓  This mix will load."], "mint")
         return err
 
     def go(do_launch):
         if validate():
-            messagebox.showerror("Refused", "This combination won't load correctly:\n\n" + status.get("1.0", "end")); return
+            messagebox.showerror("Not this mix", "This combination won't load correctly:\n\n" + msg["text"]); return
         s, _, sel_packs, en = selection()
         apply(None if s == "(none)" else s, sel_packs, set(en), mod_files)
         if do_launch:
             launch()
-            messagebox.showinfo("Realism Picker", "Launcher opening — pick 'Ultra Realism (shaders)' and press Play.")
+            messagebox.showinfo("Shader Mixer", "The Minecraft Launcher is opening.\nPick the 'Shader Mixer' profile and press Play.")
         else:
-            messagebox.showinfo("Realism Picker", "Saved. It applies next time you press Play on 'Ultra Realism (shaders)'.")
+            messagebox.showinfo("Shader Mixer", "Saved. It applies the next time you press Play on 'Shader Mixer'.")
 
     def current_preset():
         i = pr_list.curselection()
@@ -267,33 +347,33 @@ def gui():
     def use_preset(_=None):
         pr = current_preset()
         if not pr: return
-        about.config(text=pr.get("about", "Your saved pack."))
+        about.config(text=pr.get("about", "One of your mixes."))
         shader, sel, missing = resolve_preset(pr, installed, shaders, packs)
-        s = shader_names.index(shader) if shader else 0
-        sh_list.selection_clear(0, "end"); sh_list.selection_set(s); sh_list.see(s)
-        for p in packs: chosen[p].set(p in sel)
+        picked["shader"] = shader or "(none)"; query.set("")
+        for p in packs: chosen[p] = p in sel
         order.sort(key=lambda p: sel.index(p) if p in sel else len(sel))
         off = set(pr.get("mods_off", []))
-        for f in mod_files: mod_on[f].set(mods[f]["id"] in CORE_MODS or mods[f]["id"] not in off)
-        redraw(); validate()
-        if missing: status.insert("1.0", "✖ Not installed (run setup.py): " + ", ".join(missing) + "\n")
+        for f in mod_files:
+            mod_on[f] = mods[f]["id"] in CORE_MODS or mods[f]["id"] not in off; paint_mod(f)
+        redraw(); redraw_shaders()
+        validate(extra=[f"Not installed (run install.bat again): {', '.join(missing)}"] if missing else ())
 
     def save_preset():
         if validate():
-            messagebox.showerror("Refused", "Only working combinations can be saved:\n\n" + status.get("1.0", "end")); return
-        name = simpledialog.askstring("Save shader pack", "Name for this shader pack:", parent=root)
+            messagebox.showerror("Not this mix", "Only working combinations can be saved:\n\n" + msg["text"]); return
+        name = simpledialog.askstring("Save mix", "Name this mix:", parent=root)
         if not name or not name.strip(): return
         name = name.strip()
         old = next((i for i, p in enumerate(presets) if p["name"].lower() == name.lower()), None)
         if old is not None and presets[old].get("builtin"):
-            messagebox.showerror("Save shader pack", f"'{name}' is a built-in pack; pick another name."); return
-        if old is not None and not messagebox.askyesno("Save shader pack", f"Replace your pack '{name}'?"): return
+            messagebox.showerror("Save mix", f"'{name}' is a built-in pack. Pick another name."); return
+        if old is not None and not messagebox.askyesno("Save mix", f"Replace your mix '{name}'?"): return
         s, _, sel_packs, en = selection()
         new = {"name": name, "shader": None if s == "(none)" else s, "packs": sel_packs,
                "mods_off": sorted(mods[f]["id"] for f in mod_files if f not in en)}
         if old is None: presets.append(new)
         else: presets[old] = new
-        save_user_presets(presets); redraw_presets(presets.index(new)); about.config(text="Your saved pack.")
+        save_user_presets(presets); redraw_presets(presets.index(new)); about.config(text="One of your mixes.")
 
     def delete_preset():
         pr = current_preset()
@@ -302,17 +382,13 @@ def gui():
         if messagebox.askyesno("Delete", f"Delete '{pr['name']}'?"):
             presets.remove(pr); save_user_presets(presets); redraw_presets(); use_preset()
 
-    pb = ttk.Frame(prf); pb.pack(fill="x")
-    ttk.Button(pb, text="Save current…", command=save_preset).pack(side="left")
-    ttk.Button(pb, text="Delete", command=delete_preset).pack(side="left", padx=4)
-    pr_list.bind("<<ListboxSelect>>", use_preset)
+    button(pb, "Save mix…", save_preset, "lavender").pack(side="left")
+    button(pb, "Delete", delete_preset).pack(side="left", padx=(6, 0))
+    button(foot, "Save & Launch", lambda: go(True), "lavender").pack(side="right")
+    button(foot, "Save only", lambda: go(False)).pack(side="right", padx=8)
 
-    bar = ttk.Frame(root, padding=10); bar.pack(fill="x")
-    ttk.Button(bar, text="Check", command=validate).pack(side="left")
-    ttk.Button(bar, text="Save only", command=lambda: go(False)).pack(side="right")
-    ttk.Button(bar, text="Save & Launch", command=lambda: go(True)).pack(side="right", padx=6)
-    sh_list.bind("<<ListboxSelect>>", validate)
-    for v in mod_on.values(): v.trace_add("write", lambda *_: validate())
+    pr_list.bind("<<ListboxSelect>>", use_preset)
+    sh_list.bind("<<ListboxSelect>>", pick_shader)
     redraw_presets(); use_preset()
     root.mainloop()
 
